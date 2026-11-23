@@ -39,7 +39,7 @@
 
 ```bash
 # 克隆本仓库后，用自带脚本一键源码部署
-git clone https://github.com/<你的用户名>/jindouyun.git
+git clone https://github.com/cncabc-sketch/jindouyun.git
 cd jindouyun
 bash install.sh
 ```

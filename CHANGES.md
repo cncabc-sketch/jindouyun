@@ -1,9 +1,10 @@
 # 修改记录（相对于 AimiliVPN v2.1.5）
 
 本项目（筋斗云 JindouYun）fork 自 [baoweise-bot/aimili-vpngate](https://github.com/baoweise-bot/aimili-vpngate) v2.1.5，
-按 GPL-3.0 要求在此列明本项目对原文件的全部修改。修改仅涉及两个文件：
-`vpngate_manager.py`、`proxy_server.py`。其余文件与原版 v2.1.5 一致
-（原版 README 移至 `docs/UPSTREAM_README.md` 保存）。
+按 GPL-3.0 要求在此列明本项目对原文件的全部修改。功能修改涉及两个文件：
+`vpngate_manager.py`、`proxy_server.py`；另有第 6 项更名改动涉及
+`install.sh`、`compose.yaml`（仅仓库地址与展示文案）。其余文件与原版
+v2.1.5 一致（原版 README 移至 `docs/UPSTREAM_README.md` 保存）。
 
 ## 2026-11-21
 
@@ -34,3 +35,17 @@
    （`PURITY_SWITCH_LIVE_CHECK_LIMIT`，受数据源每日额度限制），
    现测结果回写缓存；纯净度仍未知的候选排在最后。切换日志会打印
    首选节点的纯净度与延迟。固定 IP 模式行为不变。
+
+6. **更名为「筋斗云 JindouYun」并迁移仓库**（`vpngate_manager.py`、
+   `proxy_server.py`、`install.sh`、`compose.yaml`）
+   项目更名发布至 `cncabc-sketch/jindouyun`：更新检查仓库
+   （`GITHUB_REPOSITORY`）、面板页脚链接、`install.sh` 默认仓库与
+   `compose.yaml` 镜像地址改指新仓库；登录页 / 面板标题、代理认证
+   realm、安装脚本文案中的产品名改为「筋斗云 JindouYun」。
+   VPNGate 节点列表镜像地址（`baoweise-bot.github.io`）为上游维护的
+   数据源，保持原样。
+
+7. **测试同步**（`tests/test_manager_logic.py`）
+   第 4 项新增纯净度列后，节点表为 8 列，上游测试中空状态行
+   `colspan="7"` 的断言已过时，改为 `colspan="8"`；另更新版本检查
+   测试中的期望仓库地址为新仓库。

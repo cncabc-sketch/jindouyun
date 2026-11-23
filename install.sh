@@ -43,13 +43,13 @@ case "$OS_TYPE" in
 esac
 
 echo -e "${BLUE}==========================================================${PLAIN}"
-echo -e "${BLUE}        欢迎使用 AimiliVPN 一键源码部署与管理脚本${PLAIN}"
+echo -e "${BLUE}        欢迎使用 筋斗云 JindouYun 一键源码部署与管理脚本${PLAIN}"
 echo -e "${BLUE}==========================================================${PLAIN}"
 
 # 3. Configure GitHub Repository URL
-# Default to the official repository (baoweise-bot/aimili-vpngate)
-DEFAULT_USER="baoweise-bot"
-DEFAULT_REPO="aimili-vpngate"
+# Default to this project repository (cncabc-sketch/jindouyun)
+DEFAULT_USER="cncabc-sketch"
+DEFAULT_REPO="jindouyun"
 
 # Allow custom repository override via command line arguments
 GITHUB_USER="${1:-${DEFAULT_USER}}"
@@ -128,7 +128,7 @@ if command -v systemctl >/dev/null 2>&1; then
     echo -e "  -> 检测到 systemd，正在创建服务配置 /lib/systemd/system/aimilivpn.service ..."
     cat > /lib/systemd/system/aimilivpn.service <<EOF
 [Unit]
-Description=AimiliVPN OpenVPN Manager with HTTP/SOCKS5 Proxy
+Description=筋斗云 JindouYun OpenVPN Manager with HTTP/SOCKS5 Proxy
 After=network.target
 
 [Service]
@@ -150,7 +150,7 @@ elif command -v rc-service >/dev/null 2>&1; then
     cat > /etc/init.d/aimilivpn <<EOF
 #!/sbin/openrc-run
 
-description="AimiliVPN OpenVPN Manager with HTTP/SOCKS5 Proxy"
+description="筋斗云 JindouYun OpenVPN Manager with HTTP/SOCKS5 Proxy"
 command="/usr/bin/python3"
 command_args="${INSTALL_DIR}/vpngate_manager.py"
 command_background="yes"
@@ -418,7 +418,7 @@ def print_status():
         openvpn_status = f"{green}[已连接]{reset}" if openvpn_ok else f"{red}[未连接]{reset}"
     
     print_line("=======================================================")
-    print_line(f"               {bold}AimiliVPN 管理终端 v{get_app_version()}{reset}                ")
+    print_line(f"               {bold}筋斗云 JindouYun 管理终端 v{get_app_version()}{reset}                ")
     print_line("=======================================================")
     print_line("【核心服务状态】")
     print_line(format_line(f"代理网关 (Port {proxy_port})", gateway_status))
@@ -493,25 +493,25 @@ def run_service_cmd(cmd):
         print("未检测到支持的服务管理器 (systemd/OpenRC)")
 
 def start_service():
-    print("正在启动 AimiliVPN 服务...", flush=True)
+    print("正在启动 筋斗云 JindouYun 服务...", flush=True)
     run_service_cmd("start")
     print("已发送启动指令。")
     time.sleep(1)
 
 def stop_service():
-    print("正在停止 AimiliVPN 服务...", flush=True)
+    print("正在停止 筋斗云 JindouYun 服务...", flush=True)
     run_service_cmd("stop")
     print("已发送停止指令。")
     time.sleep(1)
 
 def restart_service():
-    print("正在重启 AimiliVPN 服务...", flush=True)
+    print("正在重启 筋斗云 JindouYun 服务...", flush=True)
     run_service_cmd("restart")
     print("已发送重启指令。")
     time.sleep(1)
 
 def show_logs():
-    print("正在查看 AimiliVPN 日志 (按 Ctrl+C 退出)...", flush=True)
+    print("正在查看 筋斗云 JindouYun 日志 (按 Ctrl+C 退出)...", flush=True)
     if os.path.exists(LOG_FILE):
         try:
             subprocess.run(["tail", "-f", "-n", "50", LOG_FILE])
@@ -576,9 +576,9 @@ def update_service():
         time.sleep(2)
 
 def uninstall_service():
-    confirm = input("确定要完全卸载 AimiliVPN 吗？(y/N): ")
+    confirm = input("确定要完全卸载 筋斗云 JindouYun 吗？(y/N): ")
     if confirm.lower() == 'y':
-        print("正在完全卸载 AimiliVPN...", flush=True)
+        print("正在完全卸载 筋斗云 JindouYun...", flush=True)
         stop_service()
         if shutil.which("systemctl"):
             subprocess.run(["systemctl", "disable", "aimilivpn.service"])
@@ -615,7 +615,7 @@ def uninstall_service():
             subprocess.run(["sysctl", "--system"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
         if os.path.realpath(INSTALL_DIR) == "/opt/aimilivpn" and os.path.isdir(INSTALL_DIR):
             shutil.rmtree(INSTALL_DIR)
-        print("AimiliVPN 已卸载！")
+        print("筋斗云 JindouYun 已卸载！")
         sys.exit(0)
     else:
         print("已取消卸载。")
@@ -624,7 +624,7 @@ def uninstall_service():
 def ask_restart():
     ans = input("配置已保存。是否立即重启服务生效？(Y/n): ").strip().lower()
     if ans in ('', 'y', 'yes'):
-        print("正在重启 AimiliVPN 服务...", flush=True)
+        print("正在重启 筋斗云 JindouYun 服务...", flush=True)
         restart_service()
         print("服务已重启。")
         time.sleep(1.5)
@@ -1121,7 +1121,7 @@ if [ -d "/proc/sys/net/ipv4/conf" ]; then
     done
 fi
 
-echo -e "\n正在启动 AimiliVPN 服务并初始化网络..."
+echo -e "\n正在启动 筋斗云 JindouYun 服务并初始化网络..."
 # Avoid treating the previous process' persisted node ID as a successful new
 # connection during upgrades. The service will replace this startup state.
 if [ -f "${INSTALL_DIR}/vpngate_data/state.json" ]; then
@@ -1145,7 +1145,7 @@ elif command -v rc-service >/dev/null 2>&1; then
 fi
 
 # Wait and poll for node loading and active connection
-echo -e "\n正在等待 AimiliVPN 首次获取节点并建立加密通道 (此过程可能需要 5-90 秒)..."
+echo -e "\n正在等待 筋斗云 JindouYun 首次获取节点并建立加密通道 (此过程可能需要 5-90 秒)..."
 ACTIVE_ID=""
 LAST_MSG=""
 for i in {1..90}; do
@@ -1203,7 +1203,7 @@ echo -e "正在获取 VPS 公网 IPv6..."
 PUBLIC_IPV6=$(curl -6 -s --max-time 3 https://api.ipify.org || curl -6 -s --max-time 3 https://ifconfig.me || curl -6 -s --max-time 3 icanhazip.com || echo "")
 
 echo -e "\n${GREEN}==========================================================${PLAIN}"
-echo -e "${GREEN}             AimiliVPN 源码一键部署已完成！${PLAIN}"
+echo -e "${GREEN}             筋斗云 JindouYun 源码一键部署已完成！${PLAIN}"
 echo -e "${GREEN}==========================================================${PLAIN}"
 echo -e "  * 网页控制面板:  ${BLUE}http://${PUBLIC_IP}:${UI_PORT}/${SECRET_PATH}/${PLAIN}"
 if [ -n "$PUBLIC_IPV6" ]; then
