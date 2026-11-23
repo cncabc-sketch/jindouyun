@@ -81,3 +81,14 @@ v2.1.5 一致（原版 README 移至 `docs/UPSTREAM_README.md` 保存）。
     V1.0.0（标签「V1.0.0 筋斗云版」）。文中表示上游底座的
     「基于 AimiliVPN V2.1.5」等表述保持不变。GitHub 上先前发布的
     v2.1.5 Release 与同名标签随之删除，改发 v1.0.0。
+
+12. **面板新增 TG 交流群按钮**（`vpngate_manager.py`、`tests/test_manager_logic.py`）
+    顶部在 YouTube 频道按钮旁新增「TG 交流群」按钮，指向频道官方群
+    `https://t.me/bajiewankeji`，配 Telegram 蓝与纸飞机图标；测试同步
+    断言该链接出现在面板 HTML 中。
+
+13. **移除 VPS 购买推荐**（`vpngate_manager.py`、`tests/test_manager_logic.py`）
+    删除上游遗留的右侧「VPS购买推荐」浮标及其弹窗：弹窗内含上游的
+    RackNerd / 搬瓦工推广链接、第三方论坛链接与原作者的捐赠地址，
+    均与本项目无关，一并移除（含相关 CSS 与 `openVpsModal` /
+    `closeVpsModal` 脚本）；测试断言改为确认浮标与弹窗均不存在。
