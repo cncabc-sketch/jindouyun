@@ -2363,6 +2363,65 @@ def sort_candidates_purity_first(candidates: list[dict[str, Any]]) -> list[dict[
     return sorted(candidates, key=sort_key)
 
 
+PURITY_AUTO_CHECK_LIMIT = 8
+
+
+def auto_check_purity(nodes: list[dict[str, Any]]) -> int:
+    """Background purity sweep, run at the end of each maintenance cycle.
+
+    Live-checks available nodes that have no fresh cached purity score,
+    lowest latency first, at most PURITY_AUTO_CHECK_LIMIT per cycle so
+    the free proxycheck.io quota (100 queries/day) is spent gradually
+    and never on nodes that failed their connectivity probe. Results go
+    into the same 7-day cache the panel and the failover sorter read.
+    Returns how many nodes were newly checked.
+    """
+    cache = load_purity_cache()
+    now_ts = int(time.time())
+
+    def has_fresh_score(node: dict[str, Any]) -> bool:
+        entry = cache.get(str(node.get("ip") or ""))
+        if isinstance(entry, dict) and now_ts - int(entry.get("checked_at") or 0) < PURITY_CACHE_TTL_SECONDS:
+            return isinstance(entry.get("score"), (int, float))
+        return False
+
+    pending = [
+        n for n in nodes
+        if not n.get("active")
+        and n.get("probe_status") == "available"
+        and str(n.get("ip") or "")
+        and not has_fresh_score(n)
+    ]
+    pending.sort(key=lambda n: parse_int(n.get("latency_ms")) or 999999)
+
+    newly = 0
+    dirty = False
+    attempts = 0
+    for node in pending:
+        if attempts >= PURITY_AUTO_CHECK_LIMIT:
+            break
+        ip = str(node.get("ip") or "")
+        attempts += 1
+        try:
+            result = check_ip_purity(ip)
+        except PurityQuotaError:
+            print("[纯净度] proxycheck.io 今日免费额度已用完，后台自动检测本轮停止", flush=True)
+            log_to_json("WARNING", "Purity", "proxycheck.io 今日免费额度已用完，后台自动检测本轮停止")
+            break
+        except Exception:
+            continue
+        cache[ip] = result
+        dirty = True
+        newly += 1
+    if dirty:
+        save_purity_cache(cache)
+    if newly:
+        msg = f"后台纯净度自动检测：本轮新检测 {newly} 个可用节点"
+        print(f"[纯净度] {msg}", flush=True)
+        log_to_json("INFO", "Purity", msg)
+    return newly
+
+
 def auto_switch_node(attempt: int = 0) -> None:
     if attempt >= 3:
         print("[自动切换] 连续切换失败已达 3 次，停止切换以防止主线程死锁，将在后台重新加载节点...", flush=True)
@@ -2890,6 +2949,14 @@ def maintain_valid_nodes(force: bool = False) -> str:
                         
                         if available_candidates:
                             auto_switch_node()
+
+        # Background purity sweep: warm up scores for available nodes so
+        # the panel shows them and purity-first failover never has to
+        # wait on switch-time checks. Never let it break the cycle.
+        try:
+            auto_check_purity(merged)
+        except Exception as exc:
+            print(f"[纯净度] 后台自动检测异常，已跳过: {exc}", flush=True)
 
         valid_nodes_count = len([n for n in merged if n.get("probe_status") == "available"])
         total_tested = len(fast_results) + len(tested_results)
