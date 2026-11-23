@@ -22,6 +22,8 @@
 适合：给自己的设备、脚本、AI 工具准备一个干净的住宅 IP 出口；注册海外服务时先看一眼 IP 干不干净。
 
 > 本项目是 YouTube 频道 **《八戒带你玩科技》** 的配套开源项目，搭建和使用教程见频道视频。
+>
+> 频道主页：[youtube.com/@bajiedainikeji](https://www.youtube.com/@bajiedainikeji)
 
 ## 相比原版的增强
 
