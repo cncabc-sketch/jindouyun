@@ -65,3 +65,12 @@ v2.1.5 一致（原版 README 移至 `docs/UPSTREAM_README.md` 保存）。
    （`APP_VERSION_LABEL`、页面兜底文案与测试断言同步）。
    另：更新检查改指本仓库后，仓库尚无 Release 时接口返回 404、
    面板报红，已在本仓库发布 v2.1.5 Release 解决。
+
+10. **发布工作流适配**（`.github/workflows/release.yml`、`RELEASE_NOTES.md`）
+    首次打 v2.1.5 标签时发布流水线失败：GitHub 最新运行镜像
+    （Ubuntu 26.04）已下架 Python 3.9，`setup-python` 在测试开始前
+    就报错，整条流水线被跳过。测试矩阵据此移除 3.9，保留 3.11 /
+    3.13（本项目实际运行环境为 Ubuntu 24.04 的 Python 3.12）。
+    同时流水线里写死的 Release 标题由「AimiliVPN …」改为
+    「筋斗云 JindouYun …」，`RELEASE_NOTES.md` 换成本项目的
+    发布说明（上游原版说明可从原仓库查看）。
