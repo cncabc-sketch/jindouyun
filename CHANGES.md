@@ -75,3 +75,9 @@ v2.1.5 一致（原版 README 移至 `docs/UPSTREAM_README.md` 保存）。
     「筋斗云 JindouYun …」，`RELEASE_NOTES.md` 换成本项目的
     发布说明（上游原版说明可从原仓库查看）；测试中对该标题的
     一致性断言同步更新。
+
+11. **版本号重启为 1.0.0**（`VERSION`、`vpngate_manager.py`、`install.sh`、发布流水线与测试）
+    筋斗云是独立项目，版本号不沿用上游的 2.1.5，首个正式版定为
+    V1.0.0（标签「V1.0.0 筋斗云版」）。文中表示上游底座的
+    「基于 AimiliVPN V2.1.5」等表述保持不变。GitHub 上先前发布的
+    v2.1.5 Release 与同名标签随之删除，改发 v1.0.0。
