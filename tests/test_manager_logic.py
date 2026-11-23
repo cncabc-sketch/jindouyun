@@ -840,8 +840,8 @@ class ManagerLogicTests(unittest.TestCase):
         self.assertEqual(519, entries[-1]["index"])
 
     def test_web_update_controls_only_expose_stable_main_channel(self) -> None:
-        self.assertEqual("1.0.1", manager.APP_VERSION)
-        self.assertEqual("V1.0.1 筋斗云版", manager.APP_VERSION_LABEL)
+        self.assertEqual("1.0.2", manager.APP_VERSION)
+        self.assertEqual("V1.0.2 筋斗云版", manager.APP_VERSION_LABEL)
         self.assertIn("检测更新", manager.INDEX_HTML)
         self.assertIn("/api/check_update", manager.INDEX_HTML)
         self.assertIn("/tree/main", manager.INDEX_HTML)
@@ -886,7 +886,7 @@ class ManagerLogicTests(unittest.TestCase):
     def test_release_workflow_uses_full_patch_version(self) -> None:
         workflow_text = (manager.ROOT_DIR / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
 
-        self.assertIn("default: v1.0.1", workflow_text)
+        self.assertIn("default: v1.0.2", workflow_text)
         self.assertIn("筋斗云 JindouYun V$(tr -d '\\r\\n' < VERSION) 正式版", workflow_text)
         self.assertNotIn("cut -d. -f1,2 VERSION", workflow_text)
 
@@ -913,8 +913,8 @@ class ManagerLogicTests(unittest.TestCase):
 
     def test_latest_release_check_reports_current_formal_version(self) -> None:
         release = {
-            "tag_name": "v1.0.1",
-            "name": "筋斗云 JindouYun V1.0.1 正式版",
+            "tag_name": "v1.0.2",
+            "name": "筋斗云 JindouYun V1.0.2 正式版",
             "draft": False,
             "prerelease": False,
         }
@@ -922,7 +922,7 @@ class ManagerLogicTests(unittest.TestCase):
             result = manager.check_latest_release()
 
         self.assertFalse(result["update_available"])
-        self.assertEqual("V1.0.1 筋斗云版", result["current_version_label"])
+        self.assertEqual("V1.0.2 筋斗云版", result["current_version_label"])
 
     def test_latest_release_check_reports_source_update_command(self) -> None:
         release = {"tag_name": "v2.2.0", "draft": False, "prerelease": False}
@@ -1044,6 +1044,161 @@ class ManagerLogicTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "no valid nodes"):
             snapshot_utils.parse_and_validate_snapshot(csv_text)
+
+
+class PuritySourceTests(unittest.TestCase):
+    def _scamalytics_payload(self, score: int, **proxy_flags) -> dict:
+        proxy = {"is_datacenter": False, "is_vpn": False, "is_resproxy": False}
+        proxy.update(proxy_flags)
+        return {
+            "scamalytics": {
+                "status": "ok",
+                "scamalytics_score": score,
+                "scamalytics_proxy": proxy,
+            }
+        }
+
+    def test_scamalytics_score_maps_to_purity(self) -> None:
+        with (
+            mock.patch.object(manager, "SCAMALYTICS_API_USER", "user"),
+            mock.patch.object(manager, "SCAMALYTICS_API_KEY", "key"),
+            mock.patch.object(
+                manager,
+                "_purity_http_get_json",
+                return_value=self._scamalytics_payload(37, is_resproxy=True),
+            ) as http_mock,
+        ):
+            entry = manager.check_ip_purity_scamalytics("219.100.37.172")
+
+        self.assertEqual(63, entry["score"])
+        self.assertEqual(37, entry["risk"])
+        self.assertEqual("scamalytics", entry["source"])
+        self.assertEqual("住宅IP", entry["type"])
+        self.assertTrue(entry["proxy"])
+        url = http_mock.call_args[0][0]
+        self.assertIn("/v3/user/", url)
+        self.assertIn("ip=219.100.37.172", url)
+
+    def test_scamalytics_datacenter_type(self) -> None:
+        with (
+            mock.patch.object(manager, "SCAMALYTICS_API_USER", "user"),
+            mock.patch.object(manager, "SCAMALYTICS_API_KEY", "key"),
+            mock.patch.object(
+                manager,
+                "_purity_http_get_json",
+                return_value=self._scamalytics_payload(10, is_datacenter=True),
+            ),
+        ):
+            entry = manager.check_ip_purity_scamalytics("203.0.113.9")
+
+        self.assertEqual(90, entry["score"])
+        self.assertEqual("机房/企业", entry["type"])
+
+    def test_scamalytics_http_error_is_sanitised(self) -> None:
+        with (
+            mock.patch.object(manager, "SCAMALYTICS_API_USER", "user"),
+            mock.patch.object(manager, "SCAMALYTICS_API_KEY", "key"),
+            mock.patch.object(
+                manager,
+                "_purity_http_get_json",
+                side_effect=RuntimeError("failed https://host/v3/user/?key=SECRET"),
+            ),
+        ):
+            with self.assertRaises(RuntimeError) as ctx:
+                manager.check_ip_purity_scamalytics("203.0.113.9")
+
+        self.assertNotIn("SECRET", str(ctx.exception))
+
+    def test_scamalytics_quota_exhaustion_raises(self) -> None:
+        with (
+            mock.patch.object(manager, "SCAMALYTICS_API_USER", "user"),
+            mock.patch.object(manager, "SCAMALYTICS_API_KEY", "key"),
+            mock.patch.object(manager, "_scamalytics_quota_take", return_value=False),
+        ):
+            with self.assertRaises(manager.PurityQuotaError):
+                manager.check_ip_purity_scamalytics("203.0.113.9")
+
+    def test_scamalytics_daily_quota_file(self) -> None:
+        quota_file = manager.DATA_DIR / "purity_quota_test.json"
+        today = manager.time.strftime("%Y-%m-%d")
+        try:
+            quota_file.write_text(
+                json.dumps({"date": today, "scamalytics": manager.SCAMALYTICS_DAILY_LIMIT}),
+                encoding="utf-8",
+            )
+            with mock.patch.object(manager, "PURITY_QUOTA_FILE", quota_file):
+                self.assertFalse(manager._scamalytics_quota_take())
+            quota_file.write_text(
+                json.dumps({"date": today, "scamalytics": 0}), encoding="utf-8"
+            )
+            with mock.patch.object(manager, "PURITY_QUOTA_FILE", quota_file):
+                self.assertTrue(manager._scamalytics_quota_take())
+            saved = json.loads(quota_file.read_text(encoding="utf-8"))
+            self.assertEqual(1, saved["scamalytics"])
+        finally:
+            quota_file.unlink(missing_ok=True)
+
+    def test_chain_prefers_scamalytics_when_configured(self) -> None:
+        sentinel = {"score": 88, "source": "scamalytics"}
+        with (
+            mock.patch.object(manager, "SCAMALYTICS_API_USER", "user"),
+            mock.patch.object(manager, "SCAMALYTICS_API_KEY", "key"),
+            mock.patch.object(manager, "check_ip_purity_scamalytics", return_value=sentinel),
+            mock.patch.object(
+                manager, "check_ip_purity_proxycheck", side_effect=AssertionError("must not be called")
+            ),
+        ):
+            self.assertIs(sentinel, manager.check_ip_purity("203.0.113.9"))
+
+    def test_chain_falls_back_when_scamalytics_fails(self) -> None:
+        sentinel = {"score": 70, "source": "proxycheck.io"}
+        with (
+            mock.patch.object(manager, "SCAMALYTICS_API_USER", "user"),
+            mock.patch.object(manager, "SCAMALYTICS_API_KEY", "key"),
+            mock.patch.object(
+                manager, "check_ip_purity_scamalytics", side_effect=RuntimeError("down")
+            ),
+            mock.patch.object(manager, "check_ip_purity_proxycheck", return_value=sentinel),
+        ):
+            self.assertIs(sentinel, manager.check_ip_purity("203.0.113.9"))
+
+    def test_chain_without_key_uses_proxycheck(self) -> None:
+        sentinel = {"score": 70, "source": "proxycheck.io"}
+        with (
+            mock.patch.object(manager, "SCAMALYTICS_API_USER", ""),
+            mock.patch.object(manager, "SCAMALYTICS_API_KEY", ""),
+            mock.patch.object(
+                manager, "check_ip_purity_scamalytics", side_effect=AssertionError("must not be called")
+            ),
+            mock.patch.object(manager, "check_ip_purity_proxycheck", return_value=sentinel),
+        ):
+            self.assertIs(sentinel, manager.check_ip_purity("203.0.113.9"))
+
+    def test_purity_entry_fresh_requires_scamalytics_source_when_configured(self) -> None:
+        now = int(manager.time.time())
+        proxycheck_entry = {"source": "proxycheck.io", "checked_at": now, "score": 30}
+        scamalytics_entry = {"source": "scamalytics", "checked_at": now, "score": 63}
+        expired_entry = {
+            "source": "scamalytics",
+            "checked_at": now - manager.PURITY_CACHE_TTL_SECONDS - 1,
+            "score": 63,
+        }
+        with (
+            mock.patch.object(manager, "SCAMALYTICS_API_USER", "user"),
+            mock.patch.object(manager, "SCAMALYTICS_API_KEY", "key"),
+        ):
+            self.assertFalse(manager.purity_entry_fresh(proxycheck_entry, now))
+            self.assertTrue(manager.purity_entry_fresh(scamalytics_entry, now))
+            self.assertFalse(manager.purity_entry_fresh(expired_entry, now))
+        with (
+            mock.patch.object(manager, "SCAMALYTICS_API_USER", ""),
+            mock.patch.object(manager, "SCAMALYTICS_API_KEY", ""),
+        ):
+            self.assertTrue(manager.purity_entry_fresh(proxycheck_entry, now))
+
+    def test_panel_sorts_nodes_by_purity(self) -> None:
+        self.assertIn("function nodePurityScore", manager.INDEX_HTML)
+        self.assertIn("bPurity - aPurity", manager.INDEX_HTML)
 
 
 class ProxyServerConcurrencyTests(unittest.TestCase):

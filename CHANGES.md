@@ -92,3 +92,23 @@ v2.1.5 一致（原版 README 移至 `docs/UPSTREAM_README.md` 保存）。
     RackNerd / 搬瓦工推广链接、第三方论坛链接与原作者的捐赠地址，
     均与本项目无关，一并移除（含相关 CSS 与 `openVpsModal` /
     `closeVpsModal` 脚本）；测试断言改为确认浮标与弹窗均不存在。
+
+14. **纯净度主数据源换 Scamalytics + 列表按纯净度排序**（`vpngate_manager.py`、`tests/test_manager_logic.py`）
+    proxycheck.io 的查询带 `seen=1&days=7&port=1`，问的是「这 IP 最近
+    当过代理没有」——VPNGate 节点几乎个个当过，220 个缓存 IP 里
+    172 个被齐刷刷扣成 30 分封顶，毫无区分度（同 IP 在 ping0.cc 上
+    风控值仅 1%）。新版新增 `check_ip_purity_scamalytics()`：配置
+    环境变量 `SCAMALYTICS_API_USER` / `SCAMALYTICS_API_KEY`（可选
+    `SCAMALYTICS_API_HOST`）后以 Scamalytics v3 欺诈分为主数据源
+    （纯净度 = 100 − 欺诈分），实测真脏的 IP 两边都是最低分
+    （1↔0）、被扣死的中间段能分开（30 → 63）；API 另会识别挂在
+    商业住宅代理网络里的 IP 并扣分（网页版头条分不含此项）。proxycheck.io 退为
+    兜底并去掉 seen/port 参数，ip-api.com 仍是最后兜底；Scamalytics
+    失败或本地日额度（150 次/天，免费档 5,000 次/月）用完时静默
+    回退。新增 `purity_entry_fresh()` 统一四处缓存新鲜度判断：配置
+    Key 后旧数据源的缓存条目视为过期，自动重新检测。API Key 在
+    请求 URL 里，HTTP 错误一律脱敏重抛，绝不把 URL 带进面板可见的
+    报错。前端 `stableSortNodes()` 改为先按纯净度从高到低排
+    （未检测的排最后），再按节点质量分排。版本号升至 1.0.2，
+    新增 `PuritySourceTests` 共 10 个测试覆盖打分映射、类型映射、
+    错误脱敏、额度、回退链、新鲜度与排序断言。

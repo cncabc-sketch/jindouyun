@@ -141,7 +141,7 @@ UPDATE_COMMAND = (
 )
 
 ROOT_DIR = Path(sys.executable).resolve().parent if globals().get("__compiled__") else Path(__file__).resolve().parent
-DEFAULT_APP_VERSION = "1.0.1"
+DEFAULT_APP_VERSION = "1.0.2"
 try:
     _version_text = (ROOT_DIR / "VERSION").read_text(encoding="utf-8").strip()
 except OSError:
@@ -318,12 +318,67 @@ def normalize_proxy_mode(value) -> str:
 
 
 class PurityQuotaError(Exception):
-    """proxycheck.io daily free quota (100/day, no key) is exhausted."""
+    """A purity data source's free quota is exhausted."""
 
 
 PURITY_CACHE_FILE = DATA_DIR / "purity_cache.json"
 PURITY_CACHE_TTL_SECONDS = 7 * 24 * 3600
 PURITY_BATCH_LIMIT = 20
+
+# Scamalytics (optional, fraud-score based purity source). Configure via
+# environment: SCAMALYTICS_API_USER / SCAMALYTICS_API_KEY from the welcome
+# email, SCAMALYTICS_API_HOST for the assigned API endpoint host. The free
+# plan allows 5,000 credits/month; the local daily cap keeps a margin.
+SCAMALYTICS_API_USER = os.environ.get("SCAMALYTICS_API_USER", "").strip()
+SCAMALYTICS_API_KEY = os.environ.get("SCAMALYTICS_API_KEY", "").strip()
+SCAMALYTICS_API_HOST = os.environ.get("SCAMALYTICS_API_HOST", "api.scamalytics.com").strip() or "api.scamalytics.com"
+SCAMALYTICS_DAILY_LIMIT = 150
+PURITY_QUOTA_FILE = DATA_DIR / "purity_quota.json"
+
+
+def scamalytics_configured() -> bool:
+    return bool(SCAMALYTICS_API_USER and SCAMALYTICS_API_KEY)
+
+
+def purity_entry_fresh(entry: Any, now_ts: int) -> bool:
+    """Whether a cached purity entry can still be trusted.
+
+    Fresh means inside the 7-day TTL. When a Scamalytics key is
+    configured, entries scored by another source count as stale so the
+    panel re-scores them with the fraud-score source instead of keeping
+    the old proxycheck.io scores (whose proxy flag capped most VPNGate
+    nodes at 30).
+    """
+    if not isinstance(entry, dict):
+        return False
+    if now_ts - int(entry.get("checked_at") or 0) >= PURITY_CACHE_TTL_SECONDS:
+        return False
+    if scamalytics_configured() and entry.get("source") != "scamalytics":
+        return False
+    return True
+
+
+def _scamalytics_quota_take() -> bool:
+    """Consume one slot of today's local Scamalytics budget."""
+    today = time.strftime("%Y-%m-%d")
+    count = 0
+    try:
+        if PURITY_QUOTA_FILE.exists():
+            data = json.loads(PURITY_QUOTA_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and data.get("date") == today:
+                count = int(data.get("scamalytics") or 0)
+    except Exception:
+        count = 0
+    if count >= SCAMALYTICS_DAILY_LIMIT:
+        return False
+    try:
+        DATA_DIR.mkdir(exist_ok=True, parents=True)
+        PURITY_QUOTA_FILE.write_text(
+            json.dumps({"date": today, "scamalytics": count + 1}), encoding="utf-8"
+        )
+    except Exception:
+        pass
+    return True
 
 
 def purity_label(score: int) -> str:
@@ -361,10 +416,63 @@ def _purity_http_get_json(url: str, timeout: int = 12) -> dict:
         return json.loads(resp.read().decode("utf-8", "replace"))
 
 
+def check_ip_purity_scamalytics(ip: str) -> dict:
+    """Scamalytics v3 fraud score: purity = 100 - fraud score.
+
+    The fraud score measures abuse history, which discriminates well
+    between VPNGate nodes; proxycheck.io's "seen running a proxy" flag
+    does not (nearly every volunteer node has been seen, so they all
+    capped at 30). The API key travels in the query string, so HTTP
+    errors are re-raised sanitised: the request URL must never leak
+    into a message the panel can display.
+    """
+    if not _scamalytics_quota_take():
+        raise PurityQuotaError("Scamalytics 今日检测额度已用完")
+    url = (
+        f"https://{SCAMALYTICS_API_HOST}/v3/{SCAMALYTICS_API_USER}/"
+        f"?key={SCAMALYTICS_API_KEY}&ip={ip}"
+    )
+    try:
+        data = _purity_http_get_json(url)
+    except Exception:
+        raise RuntimeError("Scamalytics 查询失败") from None
+    body = data.get("scamalytics") if isinstance(data, dict) else None
+    if not isinstance(body, dict) or body.get("status") != "ok":
+        raise RuntimeError("Scamalytics 返回异常")
+    fraud = body.get("scamalytics_score")
+    fraud = int(fraud) if isinstance(fraud, (int, float)) else 0
+    fraud = max(0, min(100, fraud))
+    score = 100 - fraud
+    proxy_info = body.get("scamalytics_proxy") or {}
+    is_datacenter = bool(proxy_info.get("is_datacenter"))
+    is_vpn = bool(proxy_info.get("is_vpn"))
+    is_resproxy = bool(proxy_info.get("is_resproxy"))
+    if is_datacenter:
+        type_cn = "机房/企业"
+    elif is_vpn:
+        type_cn = "VPN"
+    else:
+        type_cn = "住宅IP"
+    return {
+        "score": score,
+        "label": purity_label(score),
+        "type": type_cn,
+        "risk": fraud,
+        "proxy": is_datacenter or is_vpn or is_resproxy,
+        "source": "scamalytics",
+        "checked_at": int(time.time()),
+    }
+
+
 def check_ip_purity_proxycheck(ip: str) -> dict:
-    """proxycheck.io v2, no key. 100 queries/day per source IP."""
+    """proxycheck.io v2, no key. 100 queries/day per source IP.
+
+    Fallback source. The seen/port parameters are deliberately not
+    used: asking "was this IP seen running a proxy recently" flags
+    nearly every VPNGate node and floods the panel with capped scores.
+    """
     data = _purity_http_get_json(
-        f"https://proxycheck.io/v2/{ip}?vpn=1&asn=1&risk=1&port=1&seen=1&days=7"
+        f"https://proxycheck.io/v2/{ip}?vpn=1&asn=1&risk=1"
     )
     if data.get("status") == "denied":
         raise PurityQuotaError(str(data.get("message") or "proxycheck.io 今日免费额度用完"))
@@ -425,7 +533,16 @@ def check_ip_purity_ipapi(ip: str) -> dict:
 
 
 def check_ip_purity(ip: str) -> dict:
-    """proxycheck.io first (has a real risk score); ip-api.com fallback."""
+    """Scamalytics first when a key is configured (fraud-score based);
+    proxycheck.io next (has a real risk score); ip-api.com last resort.
+    A Scamalytics failure or exhausted local budget falls through to
+    proxycheck.io silently; proxycheck.io's own quota error still
+    propagates so callers stop hammering for the day."""
+    if scamalytics_configured():
+        try:
+            return check_ip_purity_scamalytics(ip)
+        except Exception:
+            pass
     try:
         return check_ip_purity_proxycheck(ip)
     except PurityQuotaError:
@@ -2325,7 +2442,7 @@ def sort_candidates_purity_first(candidates: list[dict[str, Any]]) -> list[dict[
 
     def cached_score(node: dict[str, Any]) -> int | None:
         entry = cache.get(str(node.get("ip") or ""))
-        if isinstance(entry, dict) and now_ts - int(entry.get("checked_at") or 0) < PURITY_CACHE_TTL_SECONDS:
+        if purity_entry_fresh(entry, now_ts):
             score = entry.get("score")
             if isinstance(score, (int, float)):
                 return int(score)
@@ -2371,7 +2488,7 @@ def auto_check_purity(nodes: list[dict[str, Any]]) -> int:
 
     Live-checks available nodes that have no fresh cached purity score,
     lowest latency first, at most PURITY_AUTO_CHECK_LIMIT per cycle so
-    the free proxycheck.io quota (100 queries/day) is spent gradually
+    the data sources' free quotas are spent gradually
     and never on nodes that failed their connectivity probe. Results go
     into the same 7-day cache the panel and the failover sorter read.
     Returns how many nodes were newly checked.
@@ -2381,7 +2498,7 @@ def auto_check_purity(nodes: list[dict[str, Any]]) -> int:
 
     def has_fresh_score(node: dict[str, Any]) -> bool:
         entry = cache.get(str(node.get("ip") or ""))
-        if isinstance(entry, dict) and now_ts - int(entry.get("checked_at") or 0) < PURITY_CACHE_TTL_SECONDS:
+        if purity_entry_fresh(entry, now_ts):
             return isinstance(entry.get("score"), (int, float))
         return False
 
@@ -2405,8 +2522,8 @@ def auto_check_purity(nodes: list[dict[str, Any]]) -> int:
         try:
             result = check_ip_purity(ip)
         except PurityQuotaError:
-            print("[纯净度] proxycheck.io 今日免费额度已用完，后台自动检测本轮停止", flush=True)
-            log_to_json("WARNING", "Purity", "proxycheck.io 今日免费额度已用完，后台自动检测本轮停止")
+            print("[纯净度] 纯净度检测额度已用完，后台自动检测本轮停止", flush=True)
+            log_to_json("WARNING", "Purity", "纯净度检测额度已用完，后台自动检测本轮停止")
             break
         except Exception:
             continue
@@ -4360,12 +4477,12 @@ INDEX_HTML = r"""<!doctype html>
     <div class="dropdown">
       <button id="github_btn" class="btn-primary" type="button" aria-expanded="false" aria-controls="github_dropdown" style="background: rgba(255, 255, 255, 0.08); border: 1px solid var(--border-color); color: var(--text-primary);">
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16" style="vertical-align: middle; margin-right: 4px;"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
-        <span id="github_version_label">V1.0.1 筋斗云版</span>
+        <span id="github_version_label">V1.0.2 筋斗云版</span>
         <svg xmlns="http://www.w3.org/2000/svg" style="width:12px; height:12px; margin-left: 2px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
       </button>
       <div id="github_dropdown" class="dropdown-content github-dropdown">
         <div class="version-current">
-          <div id="current_version_label" class="version-current-label">V1.0.1 筋斗云版</div>
+          <div id="current_version_label" class="version-current-label">V1.0.2 筋斗云版</div>
           <div id="deployment_mode_label" class="version-current-meta">Python 源码部署 · 更新通道：main</div>
         </div>
         <button id="check_update_btn" type="button" onclick="checkForUpdate(event)">
@@ -5208,9 +5325,22 @@ function getFilteredNodes() {
   });
 }
 
+function nodePurityScore(n) {
+  const p = (n && n.purity && typeof n.purity === "object" && !n.purity.error) ? n.purity : null;
+  const s = p ? Number(p.score) : NaN;
+  return Number.isFinite(s) ? s : null;
+}
+
 function stableSortNodes() {
   nodes.sort((a, b) => {
     if (!a || !b) return 0;
+    const aPurity = nodePurityScore(a);
+    const bPurity = nodePurityScore(b);
+    if (aPurity !== null && bPurity !== null && bPurity !== aPurity) {
+      return bPurity - aPurity;
+    }
+    if (aPurity !== null && bPurity === null) return -1;
+    if (aPurity === null && bPurity !== null) return 1;
     const aScore = a.score || 0;
     const bScore = b.score || 0;
     if (bScore !== aScore) {
@@ -5223,7 +5353,7 @@ function stableSortNodes() {
 }
 
 function render(){
-  const versionLabel = state.app_version_label || "V1.0.1 筋斗云版";
+  const versionLabel = state.app_version_label || "V1.0.2 筋斗云版";
   if ($("github_version_label")) $("github_version_label").textContent = versionLabel;
   if ($("current_version_label")) $("current_version_label").textContent = versionLabel;
   if ($("deployment_mode_label")) {
@@ -7070,7 +7200,7 @@ class Handler(BaseHTTPRequestHandler):
                     del stripped["config_text"]
                 node_ip = str(n.get("ip") or n.get("remote_host") or "")
                 cached = purity_cache.get(node_ip) if node_ip else None
-                if isinstance(cached, dict) and now_ts - int(cached.get("checked_at") or 0) < PURITY_CACHE_TTL_SECONDS:
+                if purity_entry_fresh(cached, now_ts):
                     stripped["purity"] = cached
                 stripped_nodes.append(stripped)
             self.send_json({"nodes": stripped_nodes, "state": get_state()})
@@ -7642,7 +7772,7 @@ class Handler(BaseHTTPRequestHandler):
                         results[node_id] = {"error": "无IP"}
                         continue
                     cached = cache.get(ip)
-                    if isinstance(cached, dict) and now_ts - int(cached.get("checked_at") or 0) < PURITY_CACHE_TTL_SECONDS:
+                    if purity_entry_fresh(cached, now_ts):
                         entry = dict(cached)
                         entry["cached"] = True
                         results[node_id] = entry
