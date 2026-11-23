@@ -57,3 +57,11 @@ v2.1.5 一致（原版 README 移至 `docs/UPSTREAM_README.md` 保存）。
    proxycheck.io 每日 100 次免费额度；额度用完时本轮自动停止并
    记录日志。此前纯净度仅靠面板手动检测与切换时现测（第 5 项），
    现在面板分数会随后台周期自动补齐，切换排序也不必再等现测。
+
+9. **面板细节去上游化**（`vpngate_manager.py`、`tests/test_manager_logic.py`）
+   顶部 Telegram 按钮原指向原作者的 `t.me/arestemple`，改为指向
+   YouTube 频道《八戒带你玩科技》主页，图标与配色换成 YouTube 风格；
+   版本标签由「V2.1.5 正式版」改为「V2.1.5 筋斗云版」
+   （`APP_VERSION_LABEL`、页面兜底文案与测试断言同步）。
+   另：更新检查改指本仓库后，仓库尚无 Release 时接口返回 404、
+   面板报红，已在本仓库发布 v2.1.5 Release 解决。
