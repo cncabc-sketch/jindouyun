@@ -27,6 +27,22 @@
 > TG 交流群：https://t.me/bajiewankeji
 > 
 
+## 界面预览
+
+节点列表按纯净度从高到低排，最干净的一眼就能挑出来；脏的（0 分）沉底，没测过的排最后：
+
+![节点列表（日本）：纯净度 97 分排在最前，0 分高风险沉底](docs/images/panel-nodes-jp.png)
+
+![节点列表（韩国）：批量检测进行中，98 分纯净在最上方](docs/images/panel-nodes-kr.png)
+
+代理设置里锁定国家 + 住宅 IP，节点断了自动换同地区最干净的：
+
+![代理设置：固定地区模式，锁定日本 + 住宅 IP](docs/images/panel-proxy-settings.png)
+
+网关自带出口检测，当前出口 IP 和延迟一目了然：
+
+![网关设置与自检：本地代理出口检测](docs/images/panel-gateway.png)
+
 ## 相比原版的增强
 
 本项目基于 [AimiliVPN](https://github.com/baoweise-bot/aimili-vpngate) v2.1.5 二次开发，以下功能为本项目新增 / 修复（详见 [CHANGES.md](CHANGES.md)）：
