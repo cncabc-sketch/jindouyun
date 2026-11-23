@@ -78,7 +78,7 @@ bash install.sh
 - **固定地区模式**最省心：选好国家（如日本）+ 住宅 IP，节点断了会自动换同地区的，优先换纯净度高的
 - VPNGate 节点是志愿者提供的家用电脑，上下线频繁是常态，**不要把它当付费机场用**
 - 注册重要账号前，先在面板里点一下节点的「检测纯净度」，分数高再用
-- **纯净度数据源（可选）**：在 [Scamalytics](https://scamalytics.com) 申请免费 API（每月 5,000 次），把欢迎邮件里的 user / key 通过环境变量 `SCAMALYTICS_API_USER`、`SCAMALYTICS_API_KEY` 注入服务（另有 `SCAMALYTICS_API_HOST` 填邮件示例里的接口主机），纯净度即改为按欺诈分计算（纯净度 = 100 − 欺诈分），比 proxycheck.io 的「当过代理就扣分」更能区分节点；不配置则沿用原数据源。本地另有每日 150 次的用量上限保护免费额度
+- **纯净度数据源（可选）**：在 [Scamalytics](https://scamalytics.com) 申请免费 API（每月 5,000 次），在面板「网关设置与自检 → IP 纯净度数据源」里把欢迎邮件里的 user / key / 接口主机填进去即可（保存立即生效；也可用环境变量 `SCAMALYTICS_API_USER`、`SCAMALYTICS_API_KEY`、`SCAMALYTICS_API_HOST` 注入，面板保存优先），纯净度即改为按欺诈分计算（纯净度 = 100 − 欺诈分），比 proxycheck.io 的「当过代理就扣分」更能区分节点；不配置则沿用原数据源。本地另有每日 150 次的用量上限保护免费额度
 
 ## 致谢与许可
 

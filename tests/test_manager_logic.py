@@ -1201,6 +1201,84 @@ class PuritySourceTests(unittest.TestCase):
         self.assertIn("bPurity - aPurity", manager.INDEX_HTML)
 
 
+class ScamalyticsConfigTests(unittest.TestCase):
+    def _env_patches(self, cfg: Path):
+        return (
+            mock.patch.object(manager, "SCAMALYTICS_API_USER", "envuser"),
+            mock.patch.object(manager, "SCAMALYTICS_API_KEY", "envkey456"),
+            mock.patch.object(manager, "SCAMALYTICS_API_HOST", "api.scamalytics.com"),
+            mock.patch.object(manager, "SCAMALYTICS_CONFIG_FILE", cfg),
+        )
+
+    def test_panel_config_overrides_env(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp) / "scamalytics_config.json"
+            cfg.write_text(
+                json.dumps({"user": "paneluser", "key": "panelkey123", "host": "api13.scamalytics.com"}),
+                encoding="utf-8",
+            )
+            p_user, p_key, p_host, p_cfg = self._env_patches(cfg)
+            with p_user, p_key, p_host, p_cfg:
+                settings = manager.scamalytics_settings()
+                self.assertEqual("paneluser", settings["user"])
+                self.assertEqual("panelkey123", settings["key"])
+                self.assertEqual("api13.scamalytics.com", settings["host"])
+                self.assertEqual("panel", settings["source"])
+                self.assertTrue(manager.scamalytics_configured())
+
+    def test_env_fallback_without_panel_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp) / "missing.json"
+            p_user, p_key, p_host, p_cfg = self._env_patches(cfg)
+            with p_user, p_key, p_host, p_cfg:
+                settings = manager.scamalytics_settings()
+                self.assertEqual("envuser", settings["user"])
+                self.assertEqual("envkey456", settings["key"])
+                self.assertEqual("env", settings["source"])
+
+    def test_partial_panel_config_keeps_env_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp) / "scamalytics_config.json"
+            cfg.write_text(json.dumps({"host": "api99.scamalytics.com"}), encoding="utf-8")
+            p_user, p_key, p_host, p_cfg = self._env_patches(cfg)
+            with p_user, p_key, p_host, p_cfg:
+                settings = manager.scamalytics_settings()
+                self.assertEqual("envuser", settings["user"])
+                self.assertEqual("envkey456", settings["key"])
+                self.assertEqual("api99.scamalytics.com", settings["host"])
+                self.assertEqual("env", settings["source"])
+
+    def test_mask_secret(self) -> None:
+        self.assertEqual("", manager.mask_secret(""))
+        self.assertEqual("••••", manager.mask_secret("abcd"))
+        self.assertEqual("••••efgh", manager.mask_secret("abcdefgh"))
+
+    def test_quota_used_today(self) -> None:
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            quota = Path(tmp) / "purity_quota.json"
+            with mock.patch.object(manager, "PURITY_QUOTA_FILE", quota):
+                self.assertEqual(0, manager.scamalytics_quota_used_today())
+                quota.write_text(
+                    json.dumps({"date": time.strftime("%Y-%m-%d"), "scamalytics": 42}),
+                    encoding="utf-8",
+                )
+                self.assertEqual(42, manager.scamalytics_quota_used_today())
+                quota.write_text(
+                    json.dumps({"date": "2000-01-01", "scamalytics": 42}),
+                    encoding="utf-8",
+                )
+                self.assertEqual(0, manager.scamalytics_quota_used_today())
+
+    def test_panel_html_has_scamalytics_form(self) -> None:
+        self.assertIn('id="scam_user"', manager.INDEX_HTML)
+        self.assertIn('id="scam_key"', manager.INDEX_HTML)
+        self.assertIn('id="scam_host"', manager.INDEX_HTML)
+        self.assertIn("function saveScamalyticsConfig", manager.INDEX_HTML)
+        self.assertIn("function populateScamalyticsForm", manager.INDEX_HTML)
+
+
 class ProxyServerConcurrencyTests(unittest.TestCase):
     def test_socks5_rejects_client_without_no_auth_method(self) -> None:
         class Client:

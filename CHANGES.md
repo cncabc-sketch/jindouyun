@@ -112,3 +112,16 @@ v2.1.5 一致（原版 README 移至 `docs/UPSTREAM_README.md` 保存）。
     （未检测的排最后），再按节点质量分排。版本号升至 1.0.2，
     新增 `PuritySourceTests` 共 10 个测试覆盖打分映射、类型映射、
     错误脱敏、额度、回退链、新鲜度与排序断言。
+
+15. **Scamalytics 配置进面板**（`vpngate_manager.py`、`tests/test_manager_logic.py`）
+    第 14 项的 Key 原先只能改服务器环境变量，普通用户无从下手。
+    新版在「网关设置与自检」弹窗新增「IP 纯净度数据源（Scamalytics）」
+    区块：API 用户名 / Key / 主机直接在面板填写，保存到
+    `vpngate_data/scamalytics_config.json`（权限 0600，与 ui_auth.json
+    同等待遇），立即生效、无需重启。新增 `scamalytics_settings()`
+    统一解析配置：面板保存优先、环境变量兜底，逐字段回退；
+    `GET /api/scamalytics_config` 只回 Key 的掩码（••••+末4位）、
+    配置来源与今日已用次数，Key 全文绝不下发前端；`POST` 支持保存
+    与清除（清除后回退环境变量）。版本号升至 1.0.3，新增
+    `ScamalyticsConfigTests` 共 6 个测试覆盖覆盖优先级、部分回退、
+    掩码、额度读取与表单存在性。

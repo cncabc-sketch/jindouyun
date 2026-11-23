@@ -251,13 +251,13 @@ def write_json(path: Path, data: Any) -> None:
     with lock:
         tmp = path.with_suffix(path.suffix + ".tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        if path.name == "ui_auth.json":
+        if path.name in ("ui_auth.json", "scamalytics_config.json"):
             try:
                 tmp.chmod(0o600)
             except OSError:
                 pass
         tmp.replace(path)
-        if path.name == "ui_auth.json":
+        if path.name in ("ui_auth.json", "scamalytics_config.json"):
             try:
                 path.chmod(0o600)
             except OSError:
@@ -325,19 +325,63 @@ PURITY_CACHE_FILE = DATA_DIR / "purity_cache.json"
 PURITY_CACHE_TTL_SECONDS = 7 * 24 * 3600
 PURITY_BATCH_LIMIT = 20
 
-# Scamalytics (optional, fraud-score based purity source). Configure via
-# environment: SCAMALYTICS_API_USER / SCAMALYTICS_API_KEY from the welcome
-# email, SCAMALYTICS_API_HOST for the assigned API endpoint host. The free
-# plan allows 5,000 credits/month; the local daily cap keeps a margin.
+# Scamalytics (optional, fraud-score based purity source). Credentials
+# come from the welcome email; users can paste them in the panel
+# (网关设置与自检 → IP 纯净度数据源), which stores them in
+# DATA_DIR/scamalytics_config.json, or set the SCAMALYTICS_API_USER /
+# SCAMALYTICS_API_KEY / SCAMALYTICS_API_HOST environment variables for
+# headless deployments. The free plan allows 5,000 credits/month; the
+# local daily cap keeps a margin.
 SCAMALYTICS_API_USER = os.environ.get("SCAMALYTICS_API_USER", "").strip()
 SCAMALYTICS_API_KEY = os.environ.get("SCAMALYTICS_API_KEY", "").strip()
 SCAMALYTICS_API_HOST = os.environ.get("SCAMALYTICS_API_HOST", "api.scamalytics.com").strip() or "api.scamalytics.com"
 SCAMALYTICS_DAILY_LIMIT = 150
 PURITY_QUOTA_FILE = DATA_DIR / "purity_quota.json"
+SCAMALYTICS_CONFIG_FILE = DATA_DIR / "scamalytics_config.json"
+
+
+def scamalytics_settings() -> dict:
+    """Effective Scamalytics settings; the panel-saved config wins.
+
+    Each field falls back independently, so a panel config that only
+    overrides the host still uses the env user/key.
+    """
+    user = SCAMALYTICS_API_USER
+    key = SCAMALYTICS_API_KEY
+    host = SCAMALYTICS_API_HOST
+    source = "env" if (user and key) else "none"
+    saved = read_json(SCAMALYTICS_CONFIG_FILE, {})
+    if isinstance(saved, dict) and saved:
+        panel_creds = bool(str(saved.get("user") or "").strip() or str(saved.get("key") or "").strip())
+        user = str(saved.get("user") or user).strip()
+        key = str(saved.get("key") or key).strip()
+        host = str(saved.get("host") or host).strip() or host
+        if panel_creds and user and key:
+            source = "panel"
+    return {"user": user, "key": key, "host": host, "source": source}
 
 
 def scamalytics_configured() -> bool:
-    return bool(SCAMALYTICS_API_USER and SCAMALYTICS_API_KEY)
+    settings = scamalytics_settings()
+    return bool(settings["user"] and settings["key"])
+
+
+def mask_secret(value: str) -> str:
+    """Display-safe mask for a secret: bullet run plus the last 4 chars."""
+    if not value:
+        return ""
+    return "••••" + value[-4:] if len(value) > 4 else "••••"
+
+
+def scamalytics_quota_used_today() -> int:
+    today = time.strftime("%Y-%m-%d")
+    data = read_json(PURITY_QUOTA_FILE, {})
+    if isinstance(data, dict) and data.get("date") == today:
+        try:
+            return int(data.get("scamalytics") or 0)
+        except (TypeError, ValueError):
+            return 0
+    return 0
 
 
 def purity_entry_fresh(entry: Any, now_ts: int) -> bool:
@@ -428,9 +472,10 @@ def check_ip_purity_scamalytics(ip: str) -> dict:
     """
     if not _scamalytics_quota_take():
         raise PurityQuotaError("Scamalytics 今日检测额度已用完")
+    settings = scamalytics_settings()
     url = (
-        f"https://{SCAMALYTICS_API_HOST}/v3/{SCAMALYTICS_API_USER}/"
-        f"?key={SCAMALYTICS_API_KEY}&ip={ip}"
+        f"https://{settings['host']}/v3/{settings['user']}/"
+        f"?key={settings['key']}&ip={ip}"
     )
     try:
         data = _purity_http_get_json(url)
@@ -4886,6 +4931,31 @@ INDEX_HTML = r"""<!doctype html>
         <div style="font-size: 12px; color: var(--text-secondary); margin-top: 10px;">代理地址：<span id="proxy_auth_addr" class="mono" style="color: var(--text-primary);"></span>（用上面账号密码连接）</div>
       </div>
 
+      <!-- IP 纯净度数据源（Scamalytics） -->
+      <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: 12px; padding: 16px; margin-top: 12px;">
+        <div style="margin-bottom: 10px;">
+          <h4 style="margin: 0; font-size: 14px; font-weight: 600; color: var(--text-primary);">IP 纯净度数据源（Scamalytics）</h4>
+          <p style="margin: 2px 0 0 0; font-size: 12px; color: var(--text-secondary);">填上 Scamalytics 的 API 后，纯净度按欺诈分计算（纯净度 = 100 − 欺诈分），比兜底数据源更能分辨节点好坏。在 <a href="https://scamalytics.com/" target="_blank" rel="noopener" style="color: var(--primary);">scamalytics.com</a> 免费注册（每月 5,000 次），欢迎邮件里有 user / key 和接口主机示例。保存后立即生效，无需重启；不填则继续用兜底数据源。</p>
+        </div>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end;">
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label for="scam_user" style="font-size: 12px; color: var(--text-secondary);">API 用户名</label>
+            <input id="scam_user" class="input-field" style="width: 150px; height: 36px;" autocomplete="off" placeholder="欢迎邮件里的 user" />
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label for="scam_key" style="font-size: 12px; color: var(--text-secondary);">API Key</label>
+            <input id="scam_key" type="password" class="input-field" style="width: 200px; height: 36px;" placeholder="粘贴欢迎邮件里的 key" autocomplete="new-password" />
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label for="scam_host" style="font-size: 12px; color: var(--text-secondary);">API 主机</label>
+            <input id="scam_host" class="input-field" style="width: 190px; height: 36px;" autocomplete="off" placeholder="api13.scamalytics.com" />
+          </div>
+          <button id="btn_save_scam" class="btn-primary" style="height: 36px; padding: 0 16px; font-size: 13px;" onclick="saveScamalyticsConfig()">保存</button>
+          <button id="btn_clear_scam" type="button" style="height: 36px; padding: 0 12px; font-size: 13px; border-radius: 8px; border: 1px solid var(--border-color); background: transparent; color: var(--text-secondary); cursor: pointer;" onclick="clearScamalyticsConfig()">清除</button>
+        </div>
+        <div id="scam_status" style="font-size: 12px; color: var(--text-secondary); margin-top: 10px;">正在读取配置...</div>
+      </div>
+
       <div style="display: flex; justify-content: flex-end; margin-top: 20px;">
         <button type="button" onclick="closeGatewayModal()" style="height: 38px; padding: 0 20px; font-weight: 600; border-radius: 8px; border: 1px solid var(--border-color); background: transparent; color: var(--text-secondary); cursor: pointer;">关闭</button>
       </div>
@@ -5779,6 +5849,57 @@ async function saveProxyAuth(){
   }
 }
 
+async function populateScamalyticsForm(){
+  try {
+    const response = await fetchWithTimeout("./api/scamalytics_config", {}, 10000);
+    const result = await readJsonResponse(response, "读取 Scamalytics 配置失败");
+    if (!result.ok) return;
+    const u = $("scam_user"); if (u) u.value = result.user || "";
+    const h = $("scam_host"); if (h) h.value = result.host || "";
+    const k = $("scam_key");
+    if (k) { k.value = ""; k.placeholder = result.configured ? ("已配置 " + (result.key_masked || "") + "，留空不修改") : "粘贴欢迎邮件里的 key"; }
+    const s = $("scam_status");
+    if (s) s.textContent = result.configured
+      ? ("已启用（来源：" + (result.source === "panel" ? "面板保存" : "环境变量") + "），今日已用 " + result.today_used + " / " + result.daily_limit + " 次（本地上限）")
+      : "未配置，当前使用 proxycheck.io 兜底数据源";
+  } catch (e) { /* 读取失败不影响网关弹窗其它功能 */ }
+}
+
+async function saveScamalyticsConfig(){
+  const user = ($("scam_user").value || "").trim();
+  const key = ($("scam_key").value || "").trim();
+  const host = ($("scam_host").value || "").trim();
+  if (!user) { alert("请填 API 用户名（欢迎邮件里的 user）"); return; }
+  try {
+    const response = await fetchWithTimeout("./api/scamalytics_config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user, key, host })
+    }, 20000);
+    const result = await readJsonResponse(response, "保存 Scamalytics 配置失败");
+    if (result.ok) { alert(result.message || "已保存"); populateScamalyticsForm(); }
+    else { alert("保存失败: " + (result.error || "未知错误")); }
+  } catch (e) {
+    alert("保存失败: " + (e.message || "未知错误"));
+  }
+}
+
+async function clearScamalyticsConfig(){
+  if (!confirm("清除面板保存的 Scamalytics 配置？清除后回退到环境变量，没配环境变量就用兜底数据源。")) return;
+  try {
+    const response = await fetchWithTimeout("./api/scamalytics_config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clear: true })
+    }, 20000);
+    const result = await readJsonResponse(response, "清除 Scamalytics 配置失败");
+    if (result.ok) { alert(result.message || "已清除"); populateScamalyticsForm(); }
+    else { alert("清除失败: " + (result.error || "未知错误")); }
+  } catch (e) {
+    alert("清除失败: " + (e.message || "未知错误"));
+  }
+}
+
 async function toggleFavorite(id, event) {
   if (event) event.stopPropagation();
   if (favoriteRequestIds.has(id)) return;
@@ -6640,6 +6761,7 @@ function openGatewayModal() {
   showModal("gateway_modal", "#btn_test_proxy");
   loadGatewayStatus();
   populateProxyAuthForm();
+  populateScamalyticsForm();
   if (gatewayPollInterval) clearInterval(gatewayPollInterval);
   gatewayPollInterval = setInterval(loadGatewayStatus, 3000);
 }
@@ -7204,6 +7326,18 @@ class Handler(BaseHTTPRequestHandler):
                     stripped["purity"] = cached
                 stripped_nodes.append(stripped)
             self.send_json({"nodes": stripped_nodes, "state": get_state()})
+        elif effective_path == "/api/scamalytics_config":
+            settings = scamalytics_settings()
+            self.send_json({
+                "ok": True,
+                "configured": bool(settings["user"] and settings["key"]),
+                "user": settings["user"],
+                "key_masked": mask_secret(settings["key"]),
+                "host": settings["host"],
+                "source": settings["source"],
+                "today_used": scamalytics_quota_used_today(),
+                "daily_limit": SCAMALYTICS_DAILY_LIMIT,
+            })
         elif effective_path == "/api/check_update":
             try:
                 self.send_json(check_latest_release())
@@ -7683,6 +7817,41 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+        elif effective_path == "/api/scamalytics_config":
+            try:
+                payload = self.read_json_body()
+                if payload.get("clear"):
+                    with lock:
+                        try:
+                            SCAMALYTICS_CONFIG_FILE.unlink()
+                        except OSError:
+                            pass
+                    self.send_json({"ok": True, "message": "已清除面板保存的 Scamalytics 配置，将回退到环境变量或兜底数据源。"})
+                    return
+                new_user = str(payload.get("user") or "").strip()
+                new_key = str(payload.get("key") or "").strip()
+                new_host = str(payload.get("host") or "").strip()
+                if not new_key:
+                    new_key = scamalytics_settings()["key"]
+                if not (1 <= len(new_user) <= 64) or any(c.isspace() for c in new_user):
+                    self.send_json({"ok": False, "error": "API 用户名需 1-64 位且不能含空格"}, HTTPStatus.BAD_REQUEST)
+                    return
+                if not (8 <= len(new_key) <= 128) or any(c.isspace() for c in new_key):
+                    self.send_json({"ok": False, "error": "API Key 需 8-128 位且不能含空格（留空表示不修改）"}, HTTPStatus.BAD_REQUEST)
+                    return
+                if not new_host:
+                    new_host = "api.scamalytics.com"
+                if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]", new_host):
+                    self.send_json({"ok": False, "error": "API 主机格式不正确，应为欢迎邮件示例里的接口主机，如 api13.scamalytics.com"}, HTTPStatus.BAD_REQUEST)
+                    return
+                with lock:
+                    DATA_DIR.mkdir(exist_ok=True, parents=True)
+                    write_json(SCAMALYTICS_CONFIG_FILE, {"user": new_user, "key": new_key, "host": new_host})
+                self.send_json({"ok": True, "message": "Scamalytics 配置已保存，立即生效，无需重启。"})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            return
+
         elif effective_path == "/api/proxy_auth":
             try:
                 payload = self.read_json_body()
