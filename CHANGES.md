@@ -73,4 +73,5 @@ v2.1.5 一致（原版 README 移至 `docs/UPSTREAM_README.md` 保存）。
     3.13（本项目实际运行环境为 Ubuntu 24.04 的 Python 3.12）。
     同时流水线里写死的 Release 标题由「AimiliVPN …」改为
     「筋斗云 JindouYun …」，`RELEASE_NOTES.md` 换成本项目的
-    发布说明（上游原版说明可从原仓库查看）。
+    发布说明（上游原版说明可从原仓库查看）；测试中对该标题的
+    一致性断言同步更新。

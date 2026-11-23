@@ -885,7 +885,7 @@ class ManagerLogicTests(unittest.TestCase):
         workflow_text = (manager.ROOT_DIR / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
 
         self.assertIn("default: v2.1.5", workflow_text)
-        self.assertIn("AimiliVPN V$(tr -d '\\r\\n' < VERSION) 正式版", workflow_text)
+        self.assertIn("筋斗云 JindouYun V$(tr -d '\\r\\n' < VERSION) 正式版", workflow_text)
         self.assertNotIn("cut -d. -f1,2 VERSION", workflow_text)
 
     def test_latest_release_check_ignores_non_version_name_text(self) -> None:
