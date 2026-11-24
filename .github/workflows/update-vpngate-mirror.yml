@@ -16,6 +16,9 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  # Required once so configure-pages (enablement: true) can create the Pages
+  # site via the API when the repository has never had Pages enabled.
+  administration: write
 
 concurrency:
   group: vpngate-pages-mirror
@@ -35,6 +38,11 @@ jobs:
       - name: Fetch and validate VPNGate snapshot
         run: python scripts/build_vpngate_mirror.py --output-dir _site
       - uses: actions/configure-pages@v6
+        with:
+          # Auto-create the Pages site (source: GitHub Actions) if missing;
+          # without this the step fails with "Get Pages site failed ... Not
+          # Found" on repos where Pages was never enabled in Settings.
+          enablement: true
       - uses: actions/upload-pages-artifact@v5
         with:
           path: _site
