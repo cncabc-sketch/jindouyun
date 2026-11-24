@@ -12,13 +12,13 @@ on:
       - "scripts/build_vpngate_mirror.py"
       - "snapshot_utils.py"
 
+# Publishing goes to the gh-pages branch with the plain workflow token.
+# (The previous actions/deploy-pages flow never worked here: this repo has
+# never had a Pages site enabled in Settings, so configure-pages failed with
+# "Get Pages site failed ... Not Found", and auto-enablement is not available
+# to the workflow token on this account.)
 permissions:
-  contents: read
-  pages: write
-  id-token: write
-  # Required once so configure-pages (enablement: true) can create the Pages
-  # site via the API when the repository has never had Pages enabled.
-  administration: write
+  contents: write
 
 concurrency:
   group: vpngate-pages-mirror
@@ -27,9 +27,6 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -37,15 +34,15 @@ jobs:
           python-version: "3.11"
       - name: Fetch and validate VPNGate snapshot
         run: python scripts/build_vpngate_mirror.py --output-dir _site
-      - uses: actions/configure-pages@v6
-        with:
-          # Auto-create the Pages site (source: GitHub Actions) if missing;
-          # without this the step fails with "Get Pages site failed ... Not
-          # Found" on repos where Pages was never enabled in Settings.
-          enablement: true
-      - uses: actions/upload-pages-artifact@v5
-        with:
-          path: _site
-      - name: Deploy GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v5
+      - name: Publish mirror snapshot to gh-pages branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          touch _site/.nojekyll
+          cd _site
+          git init -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Update VPNGate mirror $(date -u +%FT%TZ)"
+          git push --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git" gh-pages
